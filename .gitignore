@@ -1,0 +1,20 @@
+# Holds the VPN password.
+/config.yaml
+
+# The vendor installer, what was unpacked from it and everything derived from
+# its code (decompiled functions, string dumps, the Ghidra project and logs)
+# stay on this machine. The notes in analysis/*.md and the inventories they
+# cite are what is published.
+/RG-SSLVPN_*.exe
+/.extracted/
+/analysis/*
+!/analysis/*.md
+!/analysis/artifact-hashes.json
+!/analysis/rea-installer.json
+!/analysis/rea-plugin-exports.json
+/hs_err_pid*.log
+
+/bin/
+/dist/
+*.test
+*.exe

@@ -1,0 +1,27 @@
+# 复制为 config.yaml，然后填写下面三项。请勿提交真实密码。
+vpn:
+  server: "https://vpn.example.com:443"
+  username: "your-username"
+  password: "your-password"
+  # 可选：将密码放到环境变量时，password 留空，填写变量名。
+  password_env: ""
+  # 硬件特征码；仅当管理员已绑定设备时填写原客户端的值。
+  hardware_id: ""
+  tls:
+    # 默认验证网关证书；自签名证书可通过 ca_file 指定信任的 PEM CA。
+    ca_file: ""
+    server_name: ""
+    insecure_skip_verify: false
+    # 程序选择“一直信任”后自动填写，按网关地址绑定证书 SHA-256 指纹。
+    trusted_certificates: {}
+
+socks5:
+  listen: "127.0.0.1:1080"
+  # 留空表示本地 SOCKS5 不认证。监听非回环地址时必须设置这两项。
+  username: ""
+  password: ""
+  max_connections: 128
+
+timeouts:
+  connect: 20s
+  handshake: 30s

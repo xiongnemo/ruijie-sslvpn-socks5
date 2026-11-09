@@ -1,0 +1,358 @@
+name: Release
+
+# A push to dev/master/main publishes a prerelease once an exact semver tag
+# exists: v1.0.N-<branch>-<commit12>, where N is the tag's patch plus the commits
+# since it. Pushing an exact vMAJOR.MINOR.PATCH tag publishes that version as a
+# release. A manual run never publishes: with `rehearse_release` it builds,
+# packages and smoke-tests the current commit as a release, so the release path
+# can be checked before the tag exists.
+on:
+  workflow_dispatch:
+    inputs:
+      rehearse_release:
+        description: "Build this commit as a release (nothing is published)"
+        required: false
+        default: false
+        type: boolean
+  push:
+    branches:
+      - dev
+      - master
+      - main
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+
+      - name: Resolve release metadata
+        id: meta
+        shell: bash
+        env:
+          REHEARSE_RELEASE: ${{ inputs.rehearse_release || false }}
+        run: |
+          set -euo pipefail
+
+          SHOULD_RELEASE="true"
+          CREATE_TAG="false"
+          PUBLISH="false"
+          RELEASE="false"
+          COMMIT="$(git rev-parse HEAD)"
+          COMMIT12="${COMMIT:0:12}"
+          BRANCH="${GITHUB_REF_NAME:-release}"
+
+          # patch = the nearest exact tag's patch plus the commits since it.
+          BASE_EXACT_TAG="$(git tag --merged HEAD --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1 || true)"
+          if [[ -z "${BASE_EXACT_TAG}" ]]; then
+            # Nothing to number a prerelease from yet. A manual run still builds,
+            # as v0.0.0, so the first release can be rehearsed before its tag.
+            BASE_TAG="v0.0.0"
+            COMMITS_SINCE=0
+            if [[ "${GITHUB_EVENT_NAME}" != "workflow_dispatch" ]]; then
+              echo "No exact semver base tag found; nothing to release."
+              SHOULD_RELEASE="false"
+            fi
+          else
+            COMMITS_SINCE="$(git rev-list "${BASE_EXACT_TAG}..HEAD" --count)"
+            IFS='.' read -r MAJOR MINOR PATCH <<< "${BASE_EXACT_TAG#v}"
+            BASE_TAG="v${MAJOR}.${MINOR}.$((PATCH + COMMITS_SINCE))"
+          fi
+
+          if [[ "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
+            # A tag build is the release, and renders bare -- but only if the tag
+            # is the version this commit computes anyway; otherwise one build
+            # would carry two versions.
+            if [[ "${GITHUB_REF_NAME}" != "${BASE_TAG}" ]]; then
+              echo "tag ${GITHUB_REF_NAME} is not the version this commit computes, ${BASE_TAG}" >&2
+              exit 1
+            fi
+            RELEASE="true"
+            PUBLISH="true"
+          elif [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            if [[ "${REHEARSE_RELEASE}" == "true" ]]; then
+              RELEASE="true"
+            fi
+          elif [[ "${SHOULD_RELEASE}" == "true" ]]; then
+            if [[ "${COMMITS_SINCE}" == "0" ]]; then
+              echo "HEAD is the exact base tag; its own tag build is the release."
+              SHOULD_RELEASE="false"
+            else
+              PUBLISH="true"
+              CREATE_TAG="true"
+            fi
+          fi
+
+          SAFE_BRANCH="$(echo "${BRANCH}" | sed -E 's/[^A-Za-z0-9._-]+/-/g; s/^-+//; s/-+$//')"
+          if [[ -z "${SAFE_BRANCH}" ]]; then
+            SAFE_BRANCH="release"
+          fi
+          if [[ "${RELEASE}" == "true" ]]; then
+            RELEASE_VERSION="${BASE_TAG}"
+          else
+            RELEASE_VERSION="${BASE_TAG}-${SAFE_BRANCH}-${COMMIT12}"
+          fi
+          TAG="${RELEASE_VERSION}"
+          if [[ "${CREATE_TAG}" == "true" ]] && git rev-parse "${TAG}" >/dev/null 2>&1; then
+            echo "Tag ${TAG} already exists; skipping automated prerelease."
+            SHOULD_RELEASE="false"
+          fi
+
+          # A release is packaged as its version; every other build is a
+          # prerelease of it, 1.0.3~pre-1 (apk 1.0.3_pre-r1), which apk-tools
+          # accepts where nFPM's default 1.0.3_dev-<commit> spelling is invalid.
+          if [[ "${RELEASE}" == "true" ]]; then
+            PACKAGE_VERSION="${BASE_TAG#v}"
+            PRERELEASE="false"
+            CHANNEL="stable"
+          else
+            PACKAGE_VERSION="${BASE_TAG#v}-pre"
+            PRERELEASE="true"
+            CHANNEL="nightly"
+          fi
+
+          {
+            echo "publish=${PUBLISH}"
+            echo "release=${RELEASE}"
+            echo "package_version=${PACKAGE_VERSION}"
+            echo "channel=${CHANNEL}"
+            echo "should_release=${SHOULD_RELEASE}"
+            echo "create_tag=${CREATE_TAG}"
+            echo "tag=${TAG}"
+            echo "commit=${COMMIT}"
+            echo "release_version=${RELEASE_VERSION}"
+            echo "prerelease=${PRERELEASE}"
+          } >> "${GITHUB_OUTPUT}"
+          echo "${RELEASE_VERSION} (release=${RELEASE}, publish=${PUBLISH})"
+
+      - name: Vet and test
+        if: steps.meta.outputs.should_release == 'true'
+        run: |
+          go vet ./...
+          go test -race -shuffle=on -count=1 ./...
+
+      - name: Build release artifacts
+        if: steps.meta.outputs.should_release == 'true'
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ steps.meta.outputs.release_version }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist out
+
+          LDFLAGS="-s -w -X github.com/xiongnemo/ruijie-sslvpn-socks5/internal/version.Version=${RELEASE_VERSION}"
+          targets=(
+            windows/386 windows/amd64 windows/arm64
+            darwin/amd64 darwin/arm64
+            linux/386 linux/amd64 linux/arm linux/arm64 linux/loong64
+            linux/mips linux/mipsle linux/mips64 linux/mips64le
+            linux/ppc64 linux/ppc64le linux/riscv64 linux/s390x
+          )
+
+          for target in "${targets[@]}"; do
+            IFS=/ read -r goos goarch <<< "${target}"
+            goarm=""
+            label="${goarch}"
+            if [[ "${goarch}" == "arm" ]]; then
+              goarm="7"
+              label="armv7"
+            fi
+            name="rj-socks_${RELEASE_VERSION}_${goos}_${label}"
+            bin="rj-socks"
+            if [[ "${goos}" == "windows" ]]; then
+              bin="rj-socks.exe"
+            fi
+            mkdir -p "dist/${name}"
+
+            CGO_ENABLED=0 GOOS="${goos}" GOARCH="${goarch}" GOARM="${goarm}" \
+              go build -trimpath -buildvcs=false -ldflags="${LDFLAGS}" -o "dist/${name}/${bin}" ./cmd/rj-socks
+            cp config.yaml.example README.md THIRD_PARTY_NOTICES.md "dist/${name}/"
+
+            files=("${bin}" config.yaml.example README.md THIRD_PARTY_NOTICES.md)
+            if [[ "${goos}" == "windows" ]]; then
+              (cd "dist/${name}" && zip -9 -q "../../out/${name}.zip" "${files[@]}")
+            else
+              tar -C "dist/${name}" -czf "out/${name}.tar.gz" "${files[@]}"
+            fi
+          done
+
+      - name: Verify embedded version
+        if: steps.meta.outputs.should_release == 'true'
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ steps.meta.outputs.release_version }}
+        run: |
+          set -euo pipefail
+          mkdir -p verify
+          tar -C verify -xzf "out/rj-socks_${RELEASE_VERSION}_linux_amd64.tar.gz"
+          GOT="$(verify/rj-socks -version)"
+          if [[ "${GOT}" != "${RELEASE_VERSION}" ]]; then
+            echo "embedded version mismatch: got ${GOT}, want ${RELEASE_VERSION}" >&2
+            exit 1
+          fi
+
+      # The Linux builds packaged for apt, dnf and apk -- and for
+      # https://package.anzupop.com, which indexes these assets where they are
+      # published. The packages are installed and run on their distributions
+      # before anything is tagged or released.
+      - name: Package for Linux
+        if: steps.meta.outputs.should_release == 'true'
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ steps.meta.outputs.release_version }}
+          PACKAGE_VERSION: ${{ steps.meta.outputs.package_version }}
+          NFPM_RELEASE: v2.48.0
+        run: |
+          set -euo pipefail
+          GOTOOLCHAIN=auto go install "github.com/goreleaser/nfpm/v2/cmd/nfpm@${NFPM_RELEASE}"
+          # build label, nFPM arch (arm7 is armhf, armv7hl and armv7 in the three formats)
+          while read -r label nfpm_arch; do
+            name="rj-socks_${RELEASE_VERSION}_linux_${label}"
+            sed -e "s|@NFPM_ARCH@|${nfpm_arch}|g" \
+                -e "s|@NFPM_VERSION@|${PACKAGE_VERSION}|g" \
+                -e "s|@NFPM_BINARY@|${PWD}/dist/${name}/rj-socks|g" \
+                -e "s|@NFPM_DOCS@|${PWD}|g" \
+                -e "s|@RJ_VERSION@|${RELEASE_VERSION}|g" \
+                packaging/nfpm.yaml > "dist/nfpm-${label}.yaml"
+            for format in deb rpm apk; do
+              nfpm package --config "dist/nfpm-${label}.yaml" --packager "${format}" --target "out/${name}.${format}"
+            done
+          done <<'EOF'
+          386 386
+          amd64 amd64
+          armv7 arm7
+          arm64 arm64
+          loong64 loong64
+          ppc64le ppc64le
+          riscv64 riscv64
+          s390x s390x
+          EOF
+          dpkg-deb -f "out/rj-socks_${RELEASE_VERSION}_linux_amd64.deb" Package Version Architecture
+          (cd out && sha256sum * > "checksums_${RELEASE_VERSION}.txt")
+          ls -l out
+
+      - name: Set up QEMU
+        if: steps.meta.outputs.should_release == 'true'
+        uses: docker/setup-qemu-action@v3
+
+      # The apk carries the static binary onto musl, and apk-tools 2 (Alpine
+      # 3.21) and 3 (3.24) parse package versions differently, so both check it.
+      - name: Smoke-install the packages
+        if: steps.meta.outputs.should_release == 'true'
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ steps.meta.outputs.release_version }}
+        run: |
+          set -euo pipefail
+          run() {
+            local platform=$1 image=$2 format=$3 label=$4
+            echo "== ${format} on ${image} (${platform})"
+            docker run --rm --platform "${platform}" -e FORMAT="${format}" -e WANT="${RELEASE_VERSION}" \
+              -v "${PWD}/out/rj-socks_${RELEASE_VERSION}_linux_${label}.${format}:/pkg.${format}:ro" "${image}" sh -euc '
+                case "$FORMAT" in
+                  deb) apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq /pkg.deb ;;
+                  rpm) dnf install -y -q /pkg.rpm ;;
+                  apk)
+                    apk add --no-cache --allow-untrusted /pkg.apk
+                    version=$(awk "/^P:rj-socks\$/ { found = 1 } found && /^V:/ { print substr(\$0, 3); exit }" /lib/apk/db/installed)
+                    invalid=$(apk version -c "$version")
+                    [ -z "$invalid" ] || { echo "apk calls $version invalid"; exit 1; }
+                    ;;
+                esac
+                test -s /usr/share/rj-socks/config.yaml.example
+                got=$(rj-socks -version)
+                echo "rj-socks -version: $got"
+                [ "$got" = "$WANT" ]
+              '
+          }
+          run linux/amd64 debian:stable deb amd64
+          run linux/amd64 ubuntu:24.04 deb amd64
+          run linux/amd64 fedora:latest rpm amd64
+          run linux/amd64 rockylinux:9 rpm amd64
+          run linux/amd64 alpine:3.21 apk amd64
+          run linux/amd64 alpine:3.24 apk amd64
+          run linux/arm64 debian:stable deb arm64
+          run linux/arm64 alpine:3.24 apk arm64
+          run linux/arm/v7 debian:stable deb armv7
+          run linux/arm/v7 alpine:3.24 apk armv7
+          run linux/386 alpine:3.24 apk 386
+          run linux/riscv64 alpine:3.24 apk riscv64
+          run linux/ppc64le alpine:3.24 apk ppc64le
+          run linux/s390x alpine:3.24 apk s390x
+
+      - name: Create tag
+        if: steps.meta.outputs.should_release == 'true' && steps.meta.outputs.create_tag == 'true' && steps.meta.outputs.publish == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git tag "${{ steps.meta.outputs.tag }}" "${{ steps.meta.outputs.commit }}"
+          git push origin "${{ steps.meta.outputs.tag }}"
+
+      - name: Upload workflow artifacts
+        if: steps.meta.outputs.should_release == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rj-socks-${{ steps.meta.outputs.release_version }}
+          path: out/*
+          if-no-files-found: error
+
+      - name: Create GitHub release
+        if: steps.meta.outputs.should_release == 'true' && steps.meta.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=()
+          if [[ "${{ steps.meta.outputs.prerelease }}" == "true" ]]; then
+            args+=(--prerelease --latest=false)
+          else
+            args+=(--latest)
+          fi
+          gh release create "${{ steps.meta.outputs.tag }}" out/* \
+            --title "rj-socks ${{ steps.meta.outputs.tag }}" \
+            --notes "Automated release for ${{ steps.meta.outputs.release_version }}." \
+            "${args[@]}"
+
+      # The package repository fetches this release by tag and hashes the assets
+      # itself, so all this sends is which release to look at; it also passes the
+      # release on to the Scoop bucket. Without the token the release still ships
+      # and the repository's own sweep picks it up later.
+      - name: Tell the package repository
+        if: steps.meta.outputs.should_release == 'true' && steps.meta.outputs.publish == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.PACKAGES_DISPATCH_TOKEN }}
+          PACKAGES_REPO: ${{ vars.PACKAGES_REPO || 'xiongnemo/packages' }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          CHANNEL: ${{ steps.meta.outputs.channel }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "PACKAGES_DISPATCH_TOKEN is not set; ${PACKAGES_REPO} will pick this up on its own schedule."
+            exit 0
+          fi
+          gh api "repos/${PACKAGES_REPO}/dispatches" \
+            -f event_type=release-published \
+            -f "client_payload[repository]=${GITHUB_REPOSITORY}" \
+            -f "client_payload[tag]=${TAG}" \
+            -f "client_payload[channel]=${CHANNEL}" \
+            -f "client_payload[sha]=${GITHUB_SHA}" \
+            || echo "::warning title=Package repository not notified::dispatch to ${PACKAGES_REPO} failed; its scheduled sweep is the backstop."

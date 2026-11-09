@@ -1,0 +1,31 @@
+# yaml-language-server: $schema=https://nfpm.goreleaser.com/schema.json
+#
+# Template, not a config: .github/workflows/release.yml replaces the @NAME@
+# placeholders before nFPM reads it. The binary is static (CGO_ENABLED=0), so the
+# same file serves the glibc packages and the musl one.
+name: rj-socks
+arch: "@NFPM_ARCH@"
+platform: linux
+version: "@NFPM_VERSION@"
+version_schema: semver
+release: "1"
+section: net
+maintainer: xiongnemo <xiongnemo@users.noreply.github.com>
+description: |-
+  Ruijie SSL VPN (RG-SSLVPN) as a local SOCKS5 proxy, without a TUN device (@RJ_VERSION@).
+vendor: xiongnemo
+homepage: https://github.com/xiongnemo/ruijie-sslvpn-socks5
+disable_globbing: true
+contents:
+  - src: "@NFPM_BINARY@"
+    dst: /usr/bin/rj-socks
+    file_info:
+      mode: 0755
+  - src: "@NFPM_DOCS@/config.yaml.example"
+    # Not under /usr/share/doc: minimal images (Ubuntu's docker image among them)
+    # exclude that tree from installs, and this file is needed, not reading.
+    dst: /usr/share/rj-socks/config.yaml.example
+  - src: "@NFPM_DOCS@/README.md"
+    dst: /usr/share/doc/rj-socks/README.md
+  - src: "@NFPM_DOCS@/THIRD_PARTY_NOTICES.md"
+    dst: /usr/share/doc/rj-socks/THIRD_PARTY_NOTICES.md
