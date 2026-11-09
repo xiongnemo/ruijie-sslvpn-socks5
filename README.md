@@ -6,6 +6,36 @@
 
 **实机验证：**已通过当前网关的账号登录、DTLS 1.2 握手、地址下发和 SOCKS5 收发验证；通过代理连接用户指定的内网 SSH 服务并收到其握手标识。当前网关没有下发 DNS，访问内网 IP 可用。其他网关及额外认证方式尚未实测；证据与支持边界见 [analysis/PROTOCOL.md](analysis/PROTOCOL.md)。
 
+## 安装
+
+### Scoop（Windows）
+
+```powershell
+scoop bucket add nemo https://github.com/xiongnemo/windows-binaries-scoop-bucket
+scoop install nemo/rj-socks          # 正式版
+scoop install nemo/rj-socks-nightly  # 跟踪 dev 分支的 prerelease
+```
+
+### Linux 软件包与 MacPorts
+
+Linux 构建（`386`、`amd64`、`armv7`、`arm64`、`loong64`、`ppc64le`、`riscv64`、`s390x`）同时打成 `.deb`、`.rpm` 和 `.apk`，随每个 release 发布，也可以从 [package.anzupop.com](https://package.anzupop.com) 安装（那里也有 dnf、apk 和 MacPorts 的用法）：
+
+```bash
+sudo curl -fsSLo /usr/share/keyrings/nemo.gpg https://package.anzupop.com/keys/nemo-packages.gpg
+echo "deb [signed-by=/usr/share/keyrings/nemo.gpg] https://package.anzupop.com/apt stable main" | sudo tee /etc/apt/sources.list.d/nemo.list
+sudo apt update && sudo apt install rj-socks
+```
+
+示例配置装在 `/usr/share/rj-socks/config.yaml.example`。把 `stable` 换成 `nightly` 即跟踪 dev 构建。
+
+### 预编译二进制
+
+每个 [release](https://github.com/xiongnemo/ruijie-sslvpn-socks5/releases) 都有 Windows、macOS 和 Linux（含 mips、ppc64 等）的压缩包，内含 `rj-socks`、`config.yaml.example`、本说明和第三方许可声明。
+
+### 版本
+
+推送精确的 `vX.Y.Z` tag 发布正式版，`rj-socks -version` 输出的就是这个干净的版本号。之后每次推送 dev 发布 prerelease `vX.Y.N-dev-<提交>`，N 为 tag 的 patch 加上 tag 之后的提交数；它的软件包版本是该版本的预发布（`1.0.3~pre-1`，apk 为 `1.0.3_pre-r1`）。每个包在发布前都会在 Debian、Ubuntu、Fedora、Rocky Linux 和 Alpine 上实际安装并运行。
+
 ## 使用
 
 ```powershell
