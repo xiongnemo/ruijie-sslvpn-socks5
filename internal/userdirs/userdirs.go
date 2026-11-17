@@ -115,7 +115,7 @@ func (e Env) ResolveConfig() (ConfigChoice, error) {
 // LegacyNotice is the one line printed to stderr when a run falls back to the
 // old location.
 func (c ConfigChoice) LegacyNotice() string {
-	return fmt.Sprintf("%s: using the configuration from the old location %s; run \"%s migrate\" to move it to %s", Tool, c.Path, Tool, c.New)
+	return fmt.Sprintf("%s: 正在使用旧位置的配置 %s；运行 \"%s migrate\" 可将其移到 %s", Tool, c.Path, Tool, c.New)
 }
 
 // fileExists reports whether path names something other than a directory. A

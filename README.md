@@ -86,7 +86,7 @@ go build -o bin/rj-socks.exe ./cmd/rj-socks
 - `~` 是用户主目录：Linux、macOS 为 `$HOME`，Windows 为 `%USERPROFILE%`。Windows 上不用 `%APPDATA%`，macOS 上不用 `~/Library`。
 - 只认绝对路径的 `XDG_CONFIG_HOME`；未设置或是相对路径时使用 `~/.config`。
 - `-config FILE` 总是优先，证书指纹也写回这个文件。
-- 不带 `-config` 时先找新位置；那里没有配置文件而当前目录有 `config.yaml`（旧版本的默认位置）时，仍使用后者，并在 stderr 提示一行 `rj-socks: using the configuration from the old location …; run "rj-socks migrate" to move it to …`。两处都没有时报错，提示把示例复制到新位置。
+- 不带 `-config` 时先找新位置；那里没有配置文件而当前目录有 `config.yaml`（旧版本的默认位置）时，仍使用后者，并在 stderr 提示一行 `rj-socks: 正在使用旧位置的配置 …；运行 "rj-socks migrate" 可将其移到 …`。两处都没有时报错，提示把示例复制到新位置。
 - 程序不会自己创建 `~/.config/rj-socks`；由 `migrate` 或你复制配置时创建。该目录权限为 0700，配置文件 0600。
 
 ### 迁移

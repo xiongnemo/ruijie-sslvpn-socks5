@@ -78,7 +78,7 @@ func TestMigrateDryRunTouchesNothing(t *testing.T) {
 		t.Fatalf("dry run changed files:\nbefore:\n%s\nafter:\n%s", before, after)
 	}
 	newPath := filepath.Join(home, ".config", "rj-socks", "config.yaml")
-	for _, want := range []string{"dry run", "current directory " + wd, legacy + " -> " + newPath} {
+	for _, want := range []string{"试运行", "当前目录 " + wd, "移动 " + legacy + " -> " + newPath} {
 		if !strings.Contains(out, want) {
 			t.Errorf("plan lacks %q:\n%s", want, out)
 		}
@@ -101,7 +101,7 @@ func TestMigrateMovesConfig(t *testing.T) {
 		t.Fatal("moved configuration differs")
 	}
 	mustNotExist(t, legacy)
-	if !strings.Contains(out, "move "+legacy+" -> "+newPath) {
+	if !strings.Contains(out, "移动 "+legacy+" -> "+newPath) {
 		t.Errorf("output lacks the move:\n%s", out)
 	}
 	if strings.Contains(out, "unit-test-only") {
@@ -122,7 +122,7 @@ func TestMigrateMovesConfig(t *testing.T) {
 
 	// Idempotent: a second run has nothing to do and succeeds.
 	out, err = migrate(t, env, MigrateOptions{})
-	if err != nil || !strings.Contains(out, "nothing to migrate") {
+	if err != nil || !strings.Contains(out, "没有需要迁移的内容") {
 		t.Fatalf("second run: %v\n%s", err, out)
 	}
 }
@@ -153,7 +153,7 @@ func TestMigrateConflictKeepsBoth(t *testing.T) {
 	if readFile(t, legacy) != legacyConfig || readFile(t, newPath) != legacyConfig+"# edited since\n" {
 		t.Fatal("a conflicting copy was changed")
 	}
-	if !strings.Contains(out, "conflict") {
+	if !strings.Contains(out, "冲突") {
 		t.Errorf("conflict not reported:\n%s", out)
 	}
 }
@@ -168,7 +168,7 @@ func TestMigrateIdenticalRemovesLegacy(t *testing.T) {
 		t.Fatal(err)
 	}
 	mustNotExist(t, legacy)
-	if readFile(t, newPath) != legacyConfig || !strings.Contains(out, "remove "+legacy) {
+	if readFile(t, newPath) != legacyConfig || !strings.Contains(out, "删除 "+legacy) {
 		t.Fatalf("identical copy not handled:\n%s", out)
 	}
 }
@@ -188,7 +188,7 @@ func TestMigrateRewritesReferences(t *testing.T) {
 		t.Fatal(err)
 	}
 	newPath := filepath.Join(home, ".config", "rj-socks", "config.yaml")
-	if !strings.Contains(plan, "rewrite ca in "+newPath+": gateway.pem -> "+filepath.Join(wd, "gateway.pem")) {
+	if !strings.Contains(plan, "改写 "+newPath+" 中的 ca：gateway.pem -> "+filepath.Join(wd, "gateway.pem")) {
 		t.Fatalf("plan lacks the rewrite:\n%s", plan)
 	}
 	if readFile(t, legacy) != "ca: gateway.pem\n" {
@@ -222,7 +222,7 @@ func TestMigrateFailedRewriteStillMoves(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if readFile(t, filepath.Join(home, ".config", "rj-socks", "config.yaml")) != legacyConfig || !strings.Contains(out, "skip rewriting") {
+	if readFile(t, filepath.Join(home, ".config", "rj-socks", "config.yaml")) != legacyConfig || !strings.Contains(out, "跳过改写") {
 		t.Fatalf("failed rewrite was not reported or blocked the move:\n%s", out)
 	}
 }
@@ -240,11 +240,11 @@ func TestMigrateFrom(t *testing.T) {
 		t.Fatal("-from file was not moved")
 	}
 	mustNotExist(t, other)
-	if readFile(t, filepath.Join(wd, "config.yaml")) != "not this one" || strings.Contains(out, "current directory") {
+	if readFile(t, filepath.Join(wd, "config.yaml")) != "not this one" || strings.Contains(out, "当前目录") {
 		t.Fatalf("-from still looked in the current directory:\n%s", out)
 	}
 	out, err = migrate(t, env, MigrateOptions{From: other})
-	if err != nil || !strings.Contains(out, "nothing to migrate") {
+	if err != nil || !strings.Contains(out, "没有需要迁移的内容") {
 		t.Fatalf("missing -from file: %v\n%s", err, out)
 	}
 }
@@ -255,7 +255,7 @@ func TestMigrateFromNewLocationIsNoop(t *testing.T) {
 	writeFile(t, newPath, legacyConfig)
 	env.WorkDir = func() (string, error) { return filepath.Dir(newPath), nil }
 	out, err := migrate(t, env, MigrateOptions{})
-	if err != nil || !strings.Contains(out, "nothing to migrate") {
+	if err != nil || !strings.Contains(out, "没有需要迁移的内容") {
 		t.Fatalf("migrating the new location onto itself: %v\n%s", err, out)
 	}
 	if readFile(t, newPath) != legacyConfig {

@@ -49,7 +49,7 @@ func (e Env) Migrate(o MigrateOptions) error {
 	}
 	say := func(format string, args ...any) { fmt.Fprintf(out, format+"\n", args...) }
 	if o.DryRun {
-		say("dry run: nothing will be changed")
+		say("试运行：不改动任何文件。")
 	}
 
 	src := o.From
@@ -59,7 +59,7 @@ func (e Env) Migrate(o MigrateOptions) error {
 			return fmt.Errorf("locate the working directory: %w", err)
 		}
 		src = filepath.Join(wd, ConfigName)
-		say("looking for %s in the current directory %s (use -from to name another file)", ConfigName, wd)
+		say("在当前目录 %[2]s 查找 %[1]s（可用 -from 指定其他文件）", ConfigName, wd)
 	} else if !filepath.IsAbs(src) {
 		wd, err := e.WorkDir()
 		if err != nil {
@@ -76,7 +76,7 @@ func (e Env) Migrate(o MigrateOptions) error {
 	srcInfo, err := os.Stat(src)
 	switch {
 	case errors.Is(err, os.ErrNotExist):
-		say("nothing to migrate: %s does not exist", src)
+		say("没有需要迁移的内容：%s 不存在。", src)
 		return nil
 	case err != nil:
 		return err
@@ -89,7 +89,7 @@ func (e Env) Migrate(o MigrateOptions) error {
 		return err
 	}
 	if dstExists && os.SameFile(srcInfo, dstInfo) {
-		say("nothing to migrate: %s is already the new location", src)
+		say("没有需要迁移的内容：%s 已在新位置。", src)
 		return nil
 	}
 
@@ -101,7 +101,7 @@ func (e Env) Migrate(o MigrateOptions) error {
 	if o.Rewrite != nil {
 		if rewritten, rewrites, err = o.Rewrite(data, filepath.Dir(src)); err != nil {
 			// The move still helps; the user fixes the paths by hand.
-			say("skip rewriting paths in %s: %v; make any relative paths in it absolute after the move", src, err)
+			say("跳过改写 %s 中的路径：%v；迁移后请把其中的相对路径改成绝对路径。", src, err)
 			rewritten, rewrites = data, nil
 		}
 	}
@@ -115,7 +115,7 @@ func (e Env) Migrate(o MigrateOptions) error {
 			return err
 		}
 		if bytes.Equal(current, data) || bytes.Equal(current, rewritten) {
-			say("remove %s: the same configuration is already at %s", src, dst)
+			say("删除 %s：%s 已有相同的配置。", src, dst)
 			if !o.DryRun {
 				if err := os.Remove(src); err != nil {
 					return err
@@ -123,16 +123,16 @@ func (e Env) Migrate(o MigrateOptions) error {
 			}
 			return nil
 		}
-		say("conflict: %s and %s differ; both kept. Keep the one you want at %s and delete the other, or pass -config to choose", src, dst, dst)
+		say("冲突：%s 与 %s 内容不同，两份都已保留。请把要用的那份放到 %s 并删除另一份，或用 -config 指定。", src, dst, dst)
 		return ErrConflict
 	}
 
-	say("move %s -> %s", src, dst)
+	say("移动 %s -> %s", src, dst)
 	for _, r := range rewrites {
-		say("rewrite %s in %s: %s -> %s", r.Key, dst, r.Old, r.New)
+		say("改写 %[2]s 中的 %[1]s：%[3]s -> %[4]s", r.Key, dst, r.Old, r.New)
 	}
 	if o.DryRun {
-		say("dry run complete; run without -dry-run to apply")
+		say("试运行结束；去掉 -dry-run 即可执行。")
 		return nil
 	}
 	// Created on first write. The directory holds VPN credentials.
@@ -150,7 +150,7 @@ func (e Env) Migrate(o MigrateOptions) error {
 	if err != nil {
 		return err
 	}
-	say("done; rj-socks now reads %s", dst)
+	say("完成，rj-socks 现在读取 %s。", dst)
 	return nil
 }
 

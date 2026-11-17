@@ -156,7 +156,7 @@ func TestResolveConfigIgnoresEmptyNewDirectory(t *testing.T) {
 
 func TestLegacyNotice(t *testing.T) {
 	c := ConfigChoice{Path: filepath.FromSlash("/work/config.yaml"), Legacy: true, New: filepath.FromSlash("/home/u/.config/rj-socks/config.yaml")}
-	want := `rj-socks: using the configuration from the old location ` + c.Path + `; run "rj-socks migrate" to move it to ` + c.New
+	want := `rj-socks: 正在使用旧位置的配置 ` + c.Path + `；运行 "rj-socks migrate" 可将其移到 ` + c.New
 	if got := c.LegacyNotice(); got != want {
 		t.Fatalf("LegacyNotice() = %q, want %q", got, want)
 	}

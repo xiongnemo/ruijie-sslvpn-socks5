@@ -43,7 +43,7 @@ func TestChooseConfig(t *testing.T) {
 	if err != nil || got != legacy {
 		t.Fatalf("chooseConfig() = %s, %v; want the legacy file", got, err)
 	}
-	if want := `rj-socks: using the configuration from the old location ` + legacy + `; run "rj-socks migrate" to move it to ` + newPath + "\n"; stderr.String() != want {
+	if want := `rj-socks: 正在使用旧位置的配置 ` + legacy + `；运行 "rj-socks migrate" 可将其移到 ` + newPath + "\n"; stderr.String() != want {
 		t.Fatalf("stderr = %q, want %q", stderr.String(), want)
 	}
 
@@ -75,7 +75,7 @@ func TestRunMigrateRewritesCAFile(t *testing.T) {
 	if err := runMigrate([]string{"--dry-run", "--from", legacy}, env, &stdout); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(stdout.String(), "rewrite vpn.tls.ca_file in "+newPath+": gateway.pem -> "+ca) {
+	if !strings.Contains(stdout.String(), "改写 "+newPath+" 中的 vpn.tls.ca_file：gateway.pem -> "+ca) {
 		t.Fatalf("plan lacks the ca_file rewrite:\n%s", stdout.String())
 	}
 	if _, err := os.Stat(newPath); !os.IsNotExist(err) {
