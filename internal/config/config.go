@@ -133,6 +133,46 @@ func SaveTrust(path, origin, fingerprint string) error {
 	return os.Rename(tmp, path)
 }
 
+// AbsoluteCAFile returns the configuration with a relative vpn.tls.ca_file made
+// absolute against dir, the directory the file was read from, so the file keeps
+// working after it moves; comments and every other node are kept. changed is
+// false, and data is returned as is, when there is nothing to rewrite.
+func AbsoluteCAFile(data []byte, dir string) (out []byte, oldPath, newPath string, changed bool, err error) {
+	var doc yaml.Node
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	if err = decoder.Decode(&doc); err != nil {
+		return data, "", "", false, errors.New("invalid YAML configuration")
+	}
+	if len(doc.Content) != 1 || doc.Content[0].Kind != yaml.MappingNode {
+		return data, "", "", false, errors.New("configuration must be a YAML mapping")
+	}
+	child := func(parent *yaml.Node, key string) *yaml.Node {
+		if parent == nil || parent.Kind != yaml.MappingNode {
+			return nil
+		}
+		for i := 0; i+1 < len(parent.Content); i += 2 {
+			if parent.Content[i].Value == key {
+				return parent.Content[i+1]
+			}
+		}
+		return nil
+	}
+	ca := child(child(child(doc.Content[0], "vpn"), "tls"), "ca_file")
+	if ca == nil || ca.Kind != yaml.ScalarNode || ca.Value == "" || filepath.IsAbs(ca.Value) {
+		return data, "", "", false, nil
+	}
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		return data, "", "", false, err
+	}
+	oldPath, newPath = ca.Value, filepath.Join(absDir, ca.Value)
+	ca.Value = newPath
+	if out, err = yaml.Marshal(&doc); err != nil {
+		return data, "", "", false, err
+	}
+	return out, oldPath, newPath, true, nil
+}
+
 type SOCKS5 struct {
 	Listen         string `yaml:"listen"`
 	Username       string `yaml:"username"`

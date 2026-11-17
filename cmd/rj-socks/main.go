@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/signal"
 	"strings"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/xiongnemo/ruijie-sslvpn-socks5/internal/config"
 	"github.com/xiongnemo/ruijie-sslvpn-socks5/internal/trust"
+	"github.com/xiongnemo/ruijie-sslvpn-socks5/internal/userdirs"
 	"github.com/xiongnemo/ruijie-sslvpn-socks5/internal/version"
 	"github.com/xiongnemo/ruijie-sslvpn-socks5/internal/vpnauth"
 )
@@ -25,17 +27,35 @@ func main() {
 }
 
 func run() error {
-	path := flag.String("config", "config.yaml", "YAML configuration file")
+	// migrate is a subcommand with flags of its own, recognized only as the
+	// first argument so every existing invocation parses as before.
+	if len(os.Args) > 1 && os.Args[1] == "migrate" {
+		return runMigrate(os.Args[2:], userdirs.OS(), os.Stdout)
+	}
+	flagPath := flag.String("config", "", "YAML configuration file (default $XDG_CONFIG_HOME/rj-socks/config.yaml, then ./config.yaml)")
 	probe := flag.String("probe", "", "diagnose certificate or login without starting SOCKS5")
 	check := flag.Bool("check-config", false, "validate configuration without connecting")
 	showVersion := flag.Bool("version", false, "print the version and exit")
+	flag.Usage = usage
 	flag.Parse()
+	if flag.Arg(0) == "migrate" {
+		return errors.New(`"migrate" must be the first argument: rj-socks migrate [-dry-run] [-from FILE]`)
+	}
 	if *showVersion {
 		fmt.Println(version.Version)
 		return nil
 	}
-	c, err := config.Load(*path)
+	explicit := false
+	flag.Visit(func(f *flag.Flag) { explicit = explicit || f.Name == "config" })
+	path, err := chooseConfig(userdirs.OS(), *flagPath, explicit, os.Stderr)
 	if err != nil {
+		return err
+	}
+	c, err := config.Load(path)
+	if err != nil {
+		if !explicit && errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("no configuration file: %s does not exist, nor does config.yaml in the current directory; copy config.yaml.example to %s or pass -config", path, path)
+		}
 		return err
 	}
 	if *check {
@@ -52,7 +72,7 @@ func run() error {
 		return err
 	}
 	fmt.Println("检查 VPN 网关证书…")
-	tc, err := trust.Build(ctx, c.VPN.Server, base, c.VPN.TLS.TrustedCertificates, func(info trust.CertificateInfo) (trust.Decision, error) { return promptTrust(ctx, info) }, func(origin, fingerprint string) error { return config.SaveTrust(*path, origin, fingerprint) })
+	tc, err := trust.Build(ctx, c.VPN.Server, base, c.VPN.TLS.TrustedCertificates, func(info trust.CertificateInfo) (trust.Decision, error) { return promptTrust(ctx, info) }, func(origin, fingerprint string) error { return config.SaveTrust(path, origin, fingerprint) })
 	if err != nil {
 		return err
 	}

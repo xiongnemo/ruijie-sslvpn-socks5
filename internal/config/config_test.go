@@ -345,6 +345,51 @@ func TestSaveTrustPreservesUnrelatedYAMLNodes(t *testing.T) {
 	}
 }
 
+func TestAbsoluteCAFile(t *testing.T) {
+	oldDir := t.TempDir()
+	contents := minimalConfig + `  tls: # TLS note
+    ca_file: certificates/gateway.pem # CA note
+`
+	out, oldPath, newPath, changed, err := AbsoluteCAFile([]byte(contents), oldDir)
+	if err != nil || !changed {
+		t.Fatalf("relative ca_file not rewritten: changed=%t err=%v", changed, err)
+	}
+	want := filepath.Join(oldDir, "certificates", "gateway.pem")
+	if oldPath != "certificates/gateway.pem" || newPath != want {
+		t.Fatalf("rewrite %s -> %s, want certificates/gateway.pem -> %s", oldPath, newPath, want)
+	}
+	for _, comment := range []string{"# TLS note", "# CA note"} {
+		if !strings.Contains(string(out), comment) {
+			t.Errorf("lost YAML comment %q", comment)
+		}
+	}
+	// Loaded from anywhere else, the moved file finds the same CA.
+	moved := writeConfig(t, string(out))
+	c, err := Load(moved)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.VPN.TLS.CAFile != want || c.VPN.Password != "unit-test-only: # secret" {
+		t.Fatal("rewritten configuration lost the CA path or changed the credentials")
+	}
+
+	for _, test := range []struct{ name, content string }{
+		{"no tls", minimalConfig},
+		{"empty ca_file", minimalConfig + "  tls:\n    ca_file: ''\n"},
+		{"absolute ca_file", minimalConfig + "  tls:\n    ca_file: '" + want + "'\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			out, _, _, changed, err := AbsoluteCAFile([]byte(test.content), oldDir)
+			if err != nil || changed || string(out) != test.content {
+				t.Fatalf("nothing to rewrite, yet changed=%t err=%v", changed, err)
+			}
+		})
+	}
+	if _, _, _, _, err := AbsoluteCAFile([]byte("vpn: [\n"), oldDir); err == nil {
+		t.Error("invalid YAML was accepted")
+	}
+}
+
 func TestSaveTrustRefusesInvalidStructureWithoutChangingFile(t *testing.T) {
 	const origin = "https://gateway.test:443"
 	for _, test := range []struct{ name, content string }{
