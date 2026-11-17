@@ -26,7 +26,7 @@ echo "deb [signed-by=/usr/share/keyrings/nemo.gpg] https://package.anzupop.com/a
 sudo apt update && sudo apt install rj-socks
 ```
 
-示例配置装在 `/usr/share/rj-socks/config.yaml.example`。把 `stable` 换成 `nightly` 即跟踪 dev 构建。
+示例配置装在 `/usr/share/rj-socks/config.yaml.example`，复制到 `~/.config/rj-socks/config.yaml` 后填写（见[使用](#使用)）。把 `stable` 换成 `nightly` 即跟踪 dev 构建。
 
 ### 预编译二进制
 
@@ -39,12 +39,22 @@ sudo apt update && sudo apt install rj-socks
 ## 使用
 
 ```powershell
-Copy-Item config.yaml.example config.yaml
-# 编辑 config.yaml：vpn.server、vpn.username、vpn.password
-rj-socks -config config.yaml
+# Windows：配置在 %USERPROFILE%\.config\rj-socks\config.yaml
+New-Item -ItemType Directory -Force "$HOME\.config\rj-socks" | Out-Null
+Copy-Item config.yaml.example "$HOME\.config\rj-socks\config.yaml"
+# 编辑该文件：vpn.server、vpn.username、vpn.password
+rj-socks
 ```
 
-已经填写过 `config.yaml` 时直接运行，勿用示例覆盖。`-config` 默认为当前目录的 `config.yaml`。
+```bash
+# Linux、macOS：软件包的示例在 /usr/share/rj-socks/config.yaml.example
+mkdir -p -m 700 ~/.config/rj-socks
+cp config.yaml.example ~/.config/rj-socks/config.yaml
+chmod 600 ~/.config/rj-socks/config.yaml
+rj-socks
+```
+
+不带 `-config` 时读取 `~/.config/rj-socks/config.yaml`（设置了 `XDG_CONFIG_HOME` 时为 `$XDG_CONFIG_HOME/rj-socks/config.yaml`）；`-config` 可指定任意文件。旧版本把 `config.yaml` 放在当前目录，已经填写过的请勿用示例覆盖，运行 `rj-socks migrate` 移到新位置即可，见[文件](#文件)。
 
 仅在收到网关配置并建立用户态网络栈后才开始监听 SOCKS5。默认地址是 `127.0.0.1:1080`，按 Ctrl+C 关闭连接并退出。可用以下命令验证代理（换成你有权限访问的内网 URL）：
 
@@ -64,6 +74,30 @@ go run ./cmd/rj-socks -config config.yaml
 go build -o bin/rj-socks.exe ./cmd/rj-socks
 .\bin\rj-socks.exe -config config.yaml
 ```
+
+## 文件
+
+`rj-socks` 按用户保存的只有配置文件 `config.yaml`，其中有 VPN 密码和“一直信任”写回的证书指纹；不保存会话、Cookie、日志或 pid 文件。Linux、macOS 和 Windows 使用同一套 XDG 目录：
+
+| 内容 | 位置 | 旧位置 |
+|---|---|---|
+| 配置 `config.yaml` | `$XDG_CONFIG_HOME/rj-socks/config.yaml`，默认 `~/.config/rj-socks/config.yaml` | 当前目录的 `config.yaml` |
+
+- `~` 是用户主目录：Linux、macOS 为 `$HOME`，Windows 为 `%USERPROFILE%`。Windows 上不用 `%APPDATA%`，macOS 上不用 `~/Library`。
+- 只认绝对路径的 `XDG_CONFIG_HOME`；未设置或是相对路径时使用 `~/.config`。
+- `-config FILE` 总是优先，证书指纹也写回这个文件。
+- 不带 `-config` 时先找新位置；那里没有配置文件而当前目录有 `config.yaml`（旧版本的默认位置）时，仍使用后者，并在 stderr 提示一行 `rj-socks: using the configuration from the old location …; run "rj-socks migrate" to move it to …`。两处都没有时报错，提示把示例复制到新位置。
+- 程序不会自己创建 `~/.config/rj-socks`；由 `migrate` 或你复制配置时创建。该目录权限为 0700，配置文件 0600。
+
+### 迁移
+
+```powershell
+rj-socks migrate -dry-run                  # 只打印计划，不改动文件
+rj-socks migrate                           # 把当前目录的 config.yaml 移到新位置
+rj-socks migrate -from D:\vpn\config.yaml  # 移动指定的文件
+```
+
+不带 `-from` 时在当前目录查找，并在输出中注明。`migrate` 不覆盖文件：新位置已有内容相同的配置时删除旧副本；内容不同则两份都保留，报告冲突并以非零状态退出。配置中相对路径的 `vpn.tls.ca_file` 原本相对于旧目录，迁移时改写为绝对路径，CA 文件本身留在原处。跨磁盘移动时先复制、校验大小和 SHA-256，再删除原文件。重复运行会提示没有需要迁移的内容。`migrate` 无法检测正在运行的 rj-socks，请先停止它。`--dry-run`、`--from` 的写法同样可用。
 
 ## 证书信任
 
