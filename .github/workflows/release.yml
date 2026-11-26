@@ -138,6 +138,8 @@ jobs:
             echo "tag=${TAG}"
             echo "commit=${COMMIT}"
             echo "release_version=${RELEASE_VERSION}"
+            # The four numbers of a Windows file version: 1.0.3 is 1.0.3.0.
+            echo "numeric_version=${BASE_TAG#v}.0"
             echo "prerelease=${PRERELEASE}"
           } >> "${GITHUB_OUTPUT}"
           echo "${RELEASE_VERSION} (release=${RELEASE}, publish=${PUBLISH})"
@@ -147,6 +149,44 @@ jobs:
         run: |
           go vet ./...
           go test -race -shuffle=on -count=1 ./...
+
+      # What Windows shows on the Details tab of rj-socks.exe: a VERSIONINFO
+      # resource, and nothing else -- a manifest would change how Windows runs
+      # it. go build links rsrc_windows_<arch>.syso into the Windows build of
+      # that arch only. Prerelease is set exactly when the release step below
+      # would publish the build as a prerelease.
+      - name: Make Windows version resources
+        if: steps.meta.outputs.should_release == 'true'
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ steps.meta.outputs.release_version }}
+          NUMERIC_VERSION: ${{ steps.meta.outputs.numeric_version }}
+          PRERELEASE: ${{ steps.meta.outputs.prerelease }}
+          GO_WINRES: v0.3.3
+        run: |
+          set -euo pipefail
+          FLAGS=""
+          if [[ "${PRERELEASE}" == "true" ]]; then
+            FLAGS="Prerelease"
+          fi
+          jq -n --arg version "${RELEASE_VERSION}" --arg numeric "${NUMERIC_VERSION}" --arg flags "${FLAGS}" '
+            {RT_VERSION: {"#1": {"0000": {
+              fixed: {file_version: $numeric, product_version: $numeric, flags: $flags},
+              info: {"0409": {
+                CompanyName: "Nemo Xiong",
+                FileDescription: "Ruijie SSL VPN as a local SOCKS5 proxy, without a TUN device.",
+                FileVersion: $version,
+                InternalName: "rj-socks",
+                LegalCopyright: "Copyright © 2026 Nemo Xiong",
+                OriginalFilename: "rj-socks.exe",
+                ProductName: "rj-socks",
+                ProductVersion: $version
+              }}
+            }}}}' > cmd/rj-socks/winres.json
+          cat cmd/rj-socks/winres.json
+          go run "github.com/tc-hib/go-winres@${GO_WINRES}" make \
+            --in cmd/rj-socks/winres.json --out cmd/rj-socks/rsrc --arch 386,amd64,arm64
+          ls -l cmd/rj-socks/rsrc_windows_*.syso
 
       - name: Build release artifacts
         if: steps.meta.outputs.should_release == 'true'

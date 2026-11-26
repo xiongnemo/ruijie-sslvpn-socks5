@@ -18,3 +18,7 @@
 /dist/
 *.test
 *.exe
+
+# The Windows version resources the release workflow makes before go build.
+rsrc_windows_*.syso
+/cmd/rj-socks/winres.json
